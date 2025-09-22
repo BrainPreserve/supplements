@@ -140,7 +140,7 @@ function renderResults() {
       <h3>${escapeHTML(name)}</h3>
       <div class="badges">${badges.map(b => `<span class="badge">${escapeHTML(b)}</span>`).join('')} </div>
       <div class="sections">
-        ${box('Details', detailKVs)}
+        ${box('Details', detailKVs, true)}
         ${box('Recommended brands', brandKVs, true)}
         ${box('Indications', `<div class="kv"><div class="label">For:</div><div class="val">${escapeHTML(indText)}</div></div>`)}
       </div>
