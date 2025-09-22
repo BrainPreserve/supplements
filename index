@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brain Supplements Finder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="site-header">
+  <h1>Brain Supplements Finder</h1>
+  <p class="tagline">Search supplements and filter by indication. Nothing loads until you type or choose an indication.</p>
+</header>
+
+<main class="container">
+  <section class="controls">
+    <div class="control-group">
+      <label for="search">Search by name (type the first few letters):</label>
+      <input id="search" type="text" placeholder="e.g., mag..." autocomplete="off" />
+    </div>
+
+    <fieldset class="control-group">
+      <legend>Filter by indication (multi-select):</legend>
+      <div class="checkboxes" id="indication-boxes">
+        <label><input type="checkbox" value="sleep_flag"> Sleep</label><label><input type="checkbox" value="metabolic_flag"> Metabolic</label><label><input type="checkbox" value="immune_flag"> Immune</label><label><input type="checkbox" value="cardiovascular_flag"> Cardiovascular</label><label><input type="checkbox" value="anti_inflammatory_flag"> Anti Inflammatory</label>
+      </div>
+    </fieldset>
+
+    <div class="buttons">
+      <button id="resetBtn" class="secondary">Reset</button>
+    </div>
+  </section>
+
+  <section id="status" class="status">Type at least 1 letter or choose an indication to begin.</section>
+
+  <section id="results" class="results"></section>
+</main>
+
+<footer class="site-footer">
+  <p>Built for evidence-driven brain health coaching. Data source: <code>data/master.csv</code>.</p>
+</footer>
+
+<script>
+  window.__APP_CONFIG__ = {
+    nameCol: "supplement_name",
+    keyCol: "supplement_key",
+    aliasCol: "aliases",
+    flagCols: ["sleep_flag", "metabolic_flag", "immune_flag", "cardiovascular_flag", "anti_inflammatory_flag"],
+    detailCols: ["direct_cognitive_benefits", "indirect_cognitive_benefits", "mechanisms", "food_sources", "suggested_dosage", "potential_risks", "level_of_evidence"],
+    brandCols: ["recommended_brand", "why_top_choice", "approx_cost", "purchase_source"],
+    indicationsDisplayCol: "indications_display"
+  };
+</script>
+<script src="assets/app.js"></script>
+</body>
+</html>
