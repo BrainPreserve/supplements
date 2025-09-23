@@ -6,6 +6,7 @@
 //  • Real <p> paragraphs for AI text (no “bunched” text)
 //  • Reset clears ALL AI content + Coach Group Summary and suppresses immediate re-injection
 //  • Enforces single-selection behavior for indications (radio-like) without touching HTML
+//  • NEW: Automatically COLLAPSE the “Indications” section on every card when displayed
 //  • ES5-compatible; does not modify your app.js handlers or CSV logic
 
 (function(){
@@ -23,7 +24,7 @@
     var css = document.createElement('style');
     css.id = 'ai-insights-css';
     css.textContent =
-      /* Global KV stacking (applies to Details / Brands / Coach Summary) */
+      /* Global KV stacking (applies to Details / Brands / Coach Summary / Indications) */
       '.box .content .kv{display:block !important; padding-top:8px; margin:10px 0 14px; border-top:1px solid rgba(255,255,255,.06);}'
     + ' .box .content .kv:first-child{border-top:none; padding-top:0;}'
     + ' .box .content .kv .label{display:block !important; font-weight:600; font-size:0.95rem; opacity:.9; margin:0 0 4px;}'
@@ -251,11 +252,29 @@
     });
   }
 
+  // ---------- collapse helpers ----------
+  function collapseByTitle(card, regex){
+    var box = findBox(card, regex);
+    if (box && box.tagName && box.tagName.toLowerCase() === 'details'){
+      // Ensure it's collapsed initially
+      try { box.open = false; } catch(e){}
+      box.removeAttribute('open');
+    }
+  }
+  function collapseIndicationsOnAllCards(){
+    var cards = qsa('.card');
+    for (var i=0;i<cards.length;i++){
+      collapseByTitle(cards[i], /indications\b/i); // NEW: collapse "Indications" panels
+    }
+  }
+
   // ---------- run on all visible cards ----------
   function runAllCards(){
     if (Date.now() < SUPPRESS_UNTIL) return;
     var cards = qsa('.card');
     for (var i=0;i<cards.length;i++) enhanceCard(cards[i]);
+    // After cards are enhanced, enforce Indications collapsed
+    collapseIndicationsOnAllCards();
   }
 
   // ---------- clear helpers (Reset) ----------
