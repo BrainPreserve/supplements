@@ -71,3 +71,18 @@ button.secondary{ background: linear-gradient(180deg, rgba(122,162,255,.05), rgb
 
 a.source-link{ color:var(--accent-2); text-decoration:none; word-break:break-all; }
 a.source-link:hover{ text-decoration:underline; }
+
+/* === Coach Summary Additions === */
+.group-summary{
+  background: rgba(17,23,51,.7);
+  border:1px solid var(--border);
+  border-radius:16px;
+  box-shadow: var(--shadow);
+  padding:12px;
+  margin:16px 0 12px;
+}
+.group-summary h2{ margin:0 0 6px; font-size:20px; }
+.group-summary .muted{ color: var(--muted); }
+
+.coach-points{ margin:6px 0 0 0; padding-left:18px; }
+.coach-points li{ margin:4px 0; }
