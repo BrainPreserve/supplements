@@ -1,18 +1,21 @@
 // assets/gpt_summary.js
-// AI panel add-on (non-destructive):
-// - Inserts a separate collapsible panel “AI-Generated Coaching Insights” into each card
-// - Formats into real <p> paragraphs (no “bunched” text)
-// - Clears ALL AI panels on Reset and suppresses immediate reinjection during Reset
-// - ES5-compatible; never modifies your app.js handlers or CSV logic
+// Non-destructive AI add-on:
+//  • Per-card panel “AI-Generated Coaching Insights” (for every visible card)
+//  • Bottom-of-page “AI Group Coaching Insights” shown only when one goal is selected
+//  • Real <p> paragraphs (no bunched text)
+//  • Reset clears ALL AI content + Coach Group Summary and suppresses immediate re-injection
+//  • Enforces single-selection behavior for indications (radio-like) without touching HTML
+//  • ES5-compatible; does not modify your app.js handlers or CSV logic
 
 (function(){
-  // ===== Small helpers =====
+  // ---------- small helpers ----------
   function qs(s, r){ return (r||document).querySelector(s); }
   function qsa(s, r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
   function text(el){ return el && el.textContent ? el.textContent.trim() : ''; }
+  function has(el){ return !!(el && el.parentNode); }
 
-  // Inject minimal CSS for better readability (no edits to style.css needed)
-  ;(function injectCSS(){
+  // ---------- minimal CSS injection for readability ----------
+  (function injectCSS(){
     if (qs('#ai-insights-css')) return;
     var css = document.createElement('style');
     css.id = 'ai-insights-css';
@@ -20,11 +23,14 @@
       '.ai-insights p{margin:8px 0;line-height:1.6;}'
     + ' .ai-insights .muted{opacity:.82;}'
     + ' .ai-insights .kv{display:block;}'
-    + ' .ai-insights .kv .label{min-width:0;}';
+    + ' .ai-insights .kv .label{min-width:0;}'
+    + ' #ai-group-summary{margin:16px 0 32px; border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); background:rgba(17,23,51,.7); padding:12px;}'
+    + ' #ai-group-summary h2{margin:0 0 6px; font-size:20px;}'
+    + ' #ai-group-summary[hidden]{display:none;}';
     document.head.appendChild(css);
   })();
 
-  // Collect key-value rows within a given box
+  // ---------- collect key/values from a box or entire card ----------
   function collectKVMap(container){
     var map = {};
     var rows = qsa('.kv', container);
@@ -37,8 +43,6 @@
     }
     return map;
   }
-
-  // Collect KV from anywhere in the card (fallback when “Details” box is absent/renamed)
   function collectKVMapAnywhere(card){
     var map = {};
     var rows = qsa('.kv', card);
@@ -51,8 +55,6 @@
     }
     return map;
   }
-
-  // Find a <details class="box"> by its summary title (regex, case-insensitive)
   function findBox(card, titleRegex){
     var boxes = qsa('.box', card);
     for (var i=0;i<boxes.length;i++){
@@ -64,12 +66,12 @@
     return null;
   }
 
-  // Build payload for the function call (NEVER returns null now)
+  // ---------- payload builders ----------
   function payloadFromCard(card){
     var h3 = qs('h3', card);
     var name = text(h3) || 'Unknown supplement';
 
-    // Prefer the “Details” box; otherwise collect from anywhere
+    // Prefer “Details”; otherwise collect from whole card (fixes Glycine / Zinc cases)
     var details = findBox(card, /details/i);
     var kv  = details ? collectKVMap(details) : collectKVMapAnywhere(card);
 
@@ -88,19 +90,80 @@
       why_top_choice: kvb['why top choice'] || ''
     };
 
-    // Selected goals from indication checkboxes
+    // Single-selection goal (radio-like)
     var prefer = (window.__LLM_GOAL_KEYS || ["sleep","metabolic","cardiovascular","immune","anti_inflammatory"]);
-    var cbs = qsa('#indication-boxes input[type=checkbox]:checked');
+    var checked = qsa('#indication-boxes input[type=checkbox]:checked');
     var selectedGoals = [];
-    for (var i=0;i<cbs.length;i++){
-      var v = String(cbs[i].value||'').toLowerCase().replace('_flag','');
+    if (checked.length > 0){
+      var v = String(checked[0].value||'').toLowerCase().replace('_flag','');
       if (prefer.indexOf(v) !== -1) selectedGoals.push(v);
     }
+
     return { supplement_name: name, fields: fields, selected_goals: selectedGoals };
   }
 
-  // Insert the AI panel into a card (after “Coach Summary” if present)
-  function insertPanel(card){
+  function groupPayloadFromVisible(){
+    var boxes = qsa('.card');
+    var items = [];
+    for (var i=0;i<boxes.length;i++){
+      var card = boxes[i];
+      var h3 = qs('h3', card);
+      var name = text(h3);
+      if (!name) continue;
+
+      var details = findBox(card, /details/i);
+      var kv  = details ? collectKVMap(details) : collectKVMapAnywhere(card);
+      var brands  = findBox(card, /recommended brands/i);
+      var kvb = brands ? collectKVMap(brands) : {};
+
+      items.push({
+        supplement_name: name,
+        level_of_evidence: kv['level of evidence'] || '',
+        mechanisms: kv['mechanisms'] || '',
+        direct_cognitive_benefits: kv['direct cognitive benefits'] || '',
+        indirect_cognitive_benefits: kv['indirect cognitive benefits'] || '',
+        suggested_dosage: kv['suggested dosage'] || '',
+        why_top_choice: kvb['why top choice'] || ''
+      });
+    }
+
+    // Selected single goal value
+    var checked = qsa('#indication-boxes input[type=checkbox]:checked');
+    var goal = checked.length ? String(checked[0].value||'').toLowerCase().replace('_flag','') : '';
+
+    return { goal: goal, items: items };
+  }
+
+  // ---------- HTML helpers ----------
+  function toParagraphs(plain){
+    var blocks = String(plain||'').trim().split(/\n\s*\n/);
+    var html = '';
+    for (var i=0;i<blocks.length;i++){
+      var b = blocks[i].trim();
+      if (!b) continue;
+      b = b.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      html += '<p>'+ b +'</p>';
+    }
+    if (!html) html = '<p class="muted">Add-on unavailable; using CSV summaries only.</p>';
+    return html;
+  }
+
+  // ---------- network ----------
+  function postJSON(path, payload){
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(res){ return res.json().catch(function(){ return {}; }); })
+      .catch(function(){ return {}; });
+  }
+  function fetchLLMText(payload){
+    return postJSON('/.netlify/functions/coach_llm', payload)
+      .then(function(data){ return (data && data.ok && data.text) ? data.text : ''; });
+  }
+
+  // ---------- per-card panel ----------
+  function insertCardPanel(card){
     var sections = qs('.sections', card);
     if (!sections) return null;
 
@@ -112,6 +175,7 @@
       + '  <p class="muted">Generating…</p>'
       + '</div>';
 
+    // place after Coach Summary if present
     var boxes = qsa('.box', sections);
     var inserted = false;
     for (var i=0;i<boxes.length;i++){
@@ -127,61 +191,67 @@
     return panel;
   }
 
-  // Render plain text into clean paragraphs
-  function toParagraphs(plain){
-    var blocks = String(plain||'').trim().split(/\n\s*\n/);
-    var html = '';
-    for (var i=0;i<blocks.length;i++){
-      var b = blocks[i].trim();
-      if (!b) continue;
-      b = b.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      html += '<p>'+ b +'</p>';
-    }
-    if (!html) html = '<p class="muted">Add-on unavailable; using CSV summaries only.</p>';
-    return html;
-  }
-
-  // Call the Netlify function
-  function fetchLLMText(payload){
-    return fetch('/.netlify/functions/coach_llm', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    .then(function(res){ return res.json().catch(function(){ return {}; }); })
-    .then(function(data){ return (data && data.ok && data.text) ? data.text : ''; })
-    .catch(function(){ return ''; });
-  }
-
-  // Suppress flag to block auto-injection during Reset re-render
-  var SUPPRESS_UNTIL = 0;
-
-  // Enhance one card
   function enhanceCard(card){
     if (!card || card.getAttribute('data-llmCoach') === '1') return;
-    if (Date.now() < SUPPRESS_UNTIL) return; // do not inject during/just after Reset
+    if (Date.now() < SUPPRESS_UNTIL) return;
 
     var payload = payloadFromCard(card);
-    var panel = insertPanel(card);
+    payload.mode = 'single';
+
+    var panel = insertCardPanel(card);
     if (!panel) return;
-
     card.setAttribute('data-llmCoach','1');
-    var container = qs('.ai-insights', panel);
 
+    var container = qs('.ai-insights', panel);
     fetchLLMText(payload).then(function(out){
       container.innerHTML = toParagraphs(out);
     });
   }
 
-  // Run on visible cards (throttled)
-  function run(limit){
-    if (Date.now() < SUPPRESS_UNTIL) return; // still suppressing post-Reset
-    var cards = qsa('.card');
-    var n = Math.min(limit||5, cards.length);
-    for (var i=0;i<n;i++) enhanceCard(cards[i]);
+  // ---------- group (bottom) panel ----------
+  function ensureBottomContainer(){
+    var el = qs('#ai-group-summary');
+    if (el) return el;
+    var results = qs('#results');
+    if (!results || !results.parentNode) return null;
+
+    el = document.createElement('section');
+    el.id = 'ai-group-summary';
+    el.setAttribute('hidden','');
+    el.innerHTML = '<h2>AI Group Coaching Insights</h2><div class="ai-insights"><p class="muted">Generating…</p></div>';
+    // insert AFTER results
+    results.parentNode.insertBefore(el, results.nextSibling);
+    return el;
   }
 
-  // Remove every AI panel and allow re-injection later
+  function updateBottomGroup(){
+    var checked = qsa('#indication-boxes input[type=checkbox]:checked');
+    var container = ensureBottomContainer();
+    if (!container) return;
+
+    if (!checked.length){
+      container.hidden = true;
+      container.querySelector('.ai-insights').innerHTML = '';
+      return;
+    }
+
+    container.hidden = false;
+    container.querySelector('.ai-insights').innerHTML = '<p class="muted">Generating…</p>';
+
+    var payload = { mode: 'group', group: groupPayloadFromVisible() };
+    fetchLLMText(payload).then(function(out){
+      container.querySelector('.ai-insights').innerHTML = toParagraphs(out);
+    });
+  }
+
+  // ---------- run on all visible cards ----------
+  function runAllCards(){
+    if (Date.now() < SUPPRESS_UNTIL) return;
+    var cards = qsa('.card');
+    for (var i=0;i<cards.length;i++) enhanceCard(cards[i]);
+  }
+
+  // ---------- clear helpers (Reset) ----------
   function clearAllAIPanels(){
     var results = qs('#results');
     if (!results) return;
@@ -189,59 +259,105 @@
     for (var i=0;i<panels.length;i++){
       var card = panels[i].closest ? panels[i].closest('.card') : null;
       if (card) card.removeAttribute('data-llmCoach');
-      if (panels[i].parentNode) panels[i].parentNode.removeChild(panels[i]);
+      if (has(panels[i])) panels[i].parentNode.removeChild(panels[i]);
+    }
+  }
+  function clearTopCoachGroupSummary(){
+    var top = qs('#group-summary');
+    if (top){
+      top.innerHTML = '';
+      top.hidden = true;
+    }
+  }
+  function clearBottomGroup(){
+    var bottom = qs('#ai-group-summary');
+    if (bottom){
+      bottom.innerHTML = '<h2>AI Group Coaching Insights</h2><div class="ai-insights"></div>';
+      bottom.hidden = true;
     }
   }
 
-  // Initialize hooks (non-destructive)
+  // suppress re-injection briefly during Reset
+  var SUPPRESS_UNTIL = 0;
+
+  // ---------- enforce radio-like goal selection without HTML changes ----------
+  function initRadioBehavior(){
+    var box = qs('#indication-boxes');
+    if (!box) return;
+    box.addEventListener('change', function(ev){
+      var t = ev.target;
+      if (!t || t.type !== 'checkbox') return;
+      // uncheck all others
+      var all = qsa('input[type=checkbox]', box);
+      for (var i=0;i<all.length;i++){
+        if (all[i] !== t) all[i].checked = false;
+      }
+      // trigger group update after app rerender has happened
+      setTimeout(updateBottomGroup, 0);
+    });
+  }
+
+  // ---------- init ----------
   function init(){
     if (!window.__ENABLE_LLM_COACH) return;
 
-    // Wrap renderResults if available
+    // wrap renderResults to inject panels after your app renders
     if (typeof window.renderResults === 'function'){
       var orig = window.renderResults;
       window.renderResults = function(){
-        try { orig.apply(this, arguments); } catch(e){ /* ignore */ }
-        setTimeout(function(){ run(5); }, 0);
+        try { orig.apply(this, arguments); } catch(e){}
+        setTimeout(function(){
+          runAllCards();
+          updateBottomGroup();
+        }, 0);
       };
     } else {
-      // Fallback observer
       var results = qs('#results');
-      if (results) {
-        var obs = new MutationObserver(function(){ setTimeout(function(){ run(5); }, 0); });
+      if (results){
+        var obs = new MutationObserver(function(){
+          setTimeout(function(){
+            runAllCards();
+            updateBottomGroup();
+          }, 0);
+        });
         obs.observe(results, { childList:true });
       }
     }
 
-    // Reset button: clear AI panels and suppress reinjection briefly
+    // bind Reset to clear ALL AI + coach group summaries and suppress reinjection briefly
     var reset = qs('#resetBtn');
     if (reset){
       reset.addEventListener('click', function(){
-        // 1) Clear panels immediately
         clearAllAIPanels();
-        // 2) Suppress any auto-injection caused by app's re-render after Reset
-        SUPPRESS_UNTIL = Date.now() + 400; // 400ms window
-        // 3) After the app finishes its reset cycle, clear again just in case
-        setTimeout(clearAllAIPanels, 0);
-        setTimeout(clearAllAIPanels, 350);
+        clearTopCoachGroupSummary();
+        clearBottomGroup();
+        SUPPRESS_UNTIL = Date.now() + 600; // block reinjection during app reset render
+        setTimeout(function(){
+          clearAllAIPanels();
+          clearTopCoachGroupSummary();
+          clearBottomGroup();
+        }, 550);
       });
     }
 
-    // If search is empty AND no indications are checked, keep the page clean (no AI panels)
+    // keep page tidy when nothing is selected / search cleared
     var controls = qs('.controls');
     if (controls){
       var tidy = function(){
-        var search = qs('#search');
-        var val = search ? String(search.value||'').trim() : '';
+        var s = qs('#search'); var val = s ? String(s.value||'').trim() : '';
         var any = qsa('#indication-boxes input[type=checkbox]:checked').length > 0;
         if (!val && !any){
           SUPPRESS_UNTIL = Date.now() + 400;
           clearAllAIPanels();
+          clearTopCoachGroupSummary();
+          clearBottomGroup();
         }
       };
-      controls.addEventListener('input', function(){ setTimeout(tidy, 0); });
-      controls.addEventListener('change', function(){ setTimeout(tidy, 0); });
+      controls.addEventListener('input', function(){ setTimeout(tidy,0); });
+      controls.addEventListener('change', function(){ setTimeout(tidy,0); });
     }
+
+    initRadioBehavior(); // single-selection UX (radio-like)
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
