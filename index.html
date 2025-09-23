@@ -55,5 +55,14 @@
 </script>
 <script src="assets/app.js"></script>
 <script src="assets/coach.js"></script>
+  <!-- Feature flag: start FALSE to validate Reset first -->
+<script>
+  window.__ENABLE_LLM_COACH = false;  /* flip to true in Step 6 to enable the panel */
+  window.__LLM_GOAL_KEYS = ["sleep","metabolic","cardiovascular","immune","anti_inflammatory"];
+</script>
+
+<!-- Safe add-on (will no-op while flag is false) -->
+<script src="assets/gpt_summary.js"></script>
+
 </body>
 </html>
