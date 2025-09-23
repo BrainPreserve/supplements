@@ -1,11 +1,25 @@
 // assets/gpt_summary.js
-// Adds a separate collapsible panel: “AI-Generated Coaching Insights”.
-// Safe behavior: ES5-compatible, loaded last, and does not touch existing handlers or filters.
+// Inserts a separate collapsible panel “AI-Generated Coaching Insights” into each card,
+// formats into real <p> paragraphs, and CLEARS all AI panels on Reset.
+// ES5-compatible and isolated: does not touch your app.js handlers.
 
 (function(){
   function qs(s, r){ return (r||document).querySelector(s); }
   function qsa(s, r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
   function text(el){ return el && el.textContent ? el.textContent.trim() : ''; }
+
+  // Inject minimal CSS for better readability (no edit to style.css needed).
+  (function injectCSS(){
+    if (qs('#ai-insights-css')) return;
+    var css = document.createElement('style');
+    css.id = 'ai-insights-css';
+    css.textContent =
+      '.ai-insights p{margin:8px 0;line-height:1.6;}'
+    + ' .ai-insights .muted{opacity:.82;}'
+    + ' .ai-insights .kv{display:block;}'
+    + ' .ai-insights .kv .label{min-width:0;}';
+    document.head.appendChild(css);
+  })();
 
   function collectKVMap(detailsBox){
     var map = {};
@@ -25,6 +39,7 @@
     var boxes = qsa('.box', card);
     for (var i=0;i<boxes.length;i++){
       var sum = qs('summary', boxes[i]);
+      if (!sum) continue;
       var title = text(sum);
       if (titleRegex.test(title)) return boxes[i];
     }
@@ -71,32 +86,43 @@
     if (!sections) return null;
 
     var panel = document.createElement('details');
-    panel.className = 'box';
-    panel.innerHTML = ''
-      + '<summary><span>AI-Generated Coaching Insights</span><span class="chev">▸</span></summary>'
-      + '<div class="content">'
-      + '  <div class="kv"><div class="label">Status</div><div class="val"><span class="muted">Generating…</span></div></div>'
+    panel.className = 'box ai-insights-panel';
+    panel.innerHTML =
+      '<summary><span>AI-Generated Coaching Insights</span><span class="chev">▸</span></summary>'
+      + '<div class="content ai-insights">'
+      + '  <p class="muted">Generating…</p>'
       + '</div>';
 
+    // Place after “Coach Summary” if present; else before everything.
     var boxes = qsa('.box', sections);
     var inserted = false;
     for (var i=0;i<boxes.length;i++){
       var title = text(qs('summary', boxes[i]));
       if (/coach summary/i.test(title)){
-        if (boxes[i].nextSibling) {
-          boxes[i].parentNode.insertBefore(panel, boxes[i].nextSibling);
-        } else {
-          boxes[i].parentNode.appendChild(panel);
-        }
+        if (boxes[i].nextSibling) boxes[i].parentNode.insertBefore(panel, boxes[i].nextSibling);
+        else boxes[i].parentNode.appendChild(panel);
         inserted = true;
         break;
       }
     }
-    if (!inserted){
-      sections.insertBefore(panel, sections.firstChild);
-    }
+    if (!inserted) sections.insertBefore(panel, sections.firstChild);
     return panel;
   }
+
+  function toParagraphs(plain){
+    // Split on double newlines and wrap in <p>.
+    var blocks = String(plain||'').trim().split(/\n\s*\n/);
+    var html = '';
+    for (var i=0;i<blocks.length;i++){
+      var b = blocks[i].trim();
+      if (!b) continue;
+      // Escape minimal angle brackets to avoid accidental HTML
+      b = b.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      html += '<p>'+ b +'</p>';
+    }
+    if (!html) html = '<p class="muted">Add-on unavailable; using CSV summaries only.</p>';
+    return html;
+    }
 
   function fetchLLMText(payload){
     return fetch('/.netlify/functions/coach_llm', {
@@ -118,13 +144,9 @@
     if (!panel) return;
     card.setAttribute('data-llmCoach','1');
 
-    var valNode = qs('.val', panel);
+    var container = qs('.ai-insights', panel);
     fetchLLMText(payload).then(function(out){
-      if (out) {
-        valNode.innerHTML = out.replace(/\n/g,'<br>');
-      } else {
-        valNode.innerHTML = '<span class="muted">Add-on unavailable; using CSV summaries only.</span>';
-      }
+      container.innerHTML = toParagraphs(out);
     });
   }
 
@@ -134,28 +156,45 @@
     for (var i=0;i<n;i++) enhanceCard(cards[i]);
   }
 
-  function init(){
-    try{
-      if (!window.__ENABLE_LLM_COACH) return;
+  // === NEW: Clear all AI panels on Reset ===
+  function clearAllAIPanels(){
+    var panels = qsa('.ai-insights-panel', qs('#results'));
+    for (var i=0;i<panels.length;i++){
+      var card = panels[i].closest('.card');
+      if (card) card.removeAttribute('data-llmCoach'); // allow reinjection on next render
+      if (panels[i].parentNode) panels[i].parentNode.removeChild(panels[i]);
+    }
+  }
 
-      if (typeof window.renderResults === 'function'){
-        var orig = window.renderResults;
-        window.renderResults = function(){
-          try { orig.apply(this, arguments); } catch(e){ /* ignore */ }
-          setTimeout(function(){ run(5); }, 0);
-        };
-      } else {
-        var results = qs('#results');
-        if (!results) return;
+  function init(){
+    if (!window.__ENABLE_LLM_COACH) return;
+
+    // Hook renderResults if defined
+    if (typeof window.renderResults === 'function'){
+      var orig = window.renderResults;
+      window.renderResults = function(){
+        try { orig.apply(this, arguments); } catch(e){ /* ignore */ }
+        setTimeout(function(){ run(5); }, 0);
+      };
+    } else {
+      // Fallback observer
+      var results = qs('#results');
+      if (results) {
         var obs = new MutationObserver(function(){ setTimeout(function(){ run(5); }, 0); });
         obs.observe(results, { childList:true });
       }
-    }catch(e){ /* fail-safe */ }
+    }
+
+    // Bind Reset button to clear AI panels explicitly
+    var reset = qs('#resetBtn');
+    if (reset) {
+      reset.addEventListener('click', function(){
+        // Delay slightly to let app.js clear search/filters, then remove AI panels
+        setTimeout(clearAllAIPanels, 0);
+      });
+    }
   }
 
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
