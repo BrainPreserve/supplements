@@ -6,7 +6,6 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Optional convenience: lets you also call /api/coach_llm if ever needed
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
