@@ -1,32 +1,25 @@
 // netlify/functions/coach_llm.js
-// Purpose: Generate tightly constrained, CSV-anchored coaching text.
-// Fails safe: returns {ok:false} if key or API is unavailable.
+// Strict, CSV-anchored coaching text generator. Fails safe if key/API are unavailable.
 
 export default async (req, context) => {
   try {
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_API_KEY) {
-      return new Response(
-        JSON.stringify({ ok: false, reason: "NO_API_KEY", text: "" }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ ok: false, reason: "NO_API_KEY", text: "" }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
     }
-
-    if (req.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405 });
-    }
+    if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
     const body = await req.json().catch(() => ({}));
     const { supplement_name, fields, selected_goals = [] } = body || {};
     if (!supplement_name || !fields) {
-      return new Response(
-        JSON.stringify({ ok: false, reason: "BAD_INPUT", text: "" }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ ok: false, reason: "BAD_INPUT", text: "" }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
     }
 
-    // === Clinician-approved augmentation (non-CSV) ===
-    // You control this whitelist. The model may reference ONLY these extras, not invent new claims.
+    // ---- Clinician-approved, non-CSV augmentation (whitelist) ----
     const AUGMENT_RULES = {
       "creatine": [
         "Supports maintenance and accrual of lean mass when paired with progressive resistance training.",
@@ -47,7 +40,6 @@ export default async (req, context) => {
       "magnesium": [
         "May support sleep quality and muscle relaxation; correct deficiency where relevant."
       ]
-      // Add more items here as you approve them.
     };
 
     const norm = (s) => String(s||"").toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
@@ -61,17 +53,10 @@ export default async (req, context) => {
       indirect_cognitive_benefits = "",
       suggested_dosage = "",
       potential_risks = "",
-      why_top_choice = "",
+      why_top_choice = ""
     } = fields;
 
-    // Map selected goals to a small, fixed vocabulary
-    const GOAL_MAP = {
-      sleep: "Sleep",
-      metabolic: "Metabolic",
-      cardiovascular: "Cardiovascular",
-      immune: "Immune",
-      anti_inflammatory: "Inflammation"
-    };
+    const GOAL_MAP = { sleep:"Sleep", metabolic:"Metabolic", cardiovascular:"Cardiovascular", immune:"Immune", anti_inflammatory:"Inflammation" };
     const goals = (Array.isArray(selected_goals) ? selected_goals : [])
       .map(g => String(g||"").toLowerCase())
       .map(g => GOAL_MAP[g] || null)
@@ -116,44 +101,36 @@ export default async (req, context) => {
     };
 
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000); // 8s timeout
+    const t = setTimeout(() => ctrl.abort(), 8000);
 
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "authorization": `Bearer ${OPENAI_API_KEY}`,
-        "content-type": "application/json"
-      },
+      headers: { "authorization": `Bearer ${OPENAI_API_KEY}`, "content-type": "application/json" },
       body: JSON.stringify(payload),
       signal: ctrl.signal
     }).catch(() => null);
     clearTimeout(t);
 
     if (!resp || !resp.ok) {
-      return new Response(
-        JSON.stringify({ ok: false, reason: "API_ERROR", text: "" }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ ok: false, reason: "API_ERROR", text: "" }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
     }
 
     const data = await resp.json().catch(() => ({}));
     const text = data?.choices?.[0]?.message?.content?.trim() || "";
-
     if (!text || text.length < 40) {
-      return new Response(
-        JSON.stringify({ ok: false, reason: "EMPTY", text: "" }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ ok: false, reason: "EMPTY", text: "" }), {
+        status: 200, headers: { "content-type": "application/json" }
+      });
     }
 
-    return new Response(
-      JSON.stringify({ ok: true, text }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ ok: true, text }), {
+      status: 200, headers: { "content-type": "application/json" }
+    });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ ok: false, reason: "EXCEPTION", text: "" }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ ok: false, reason: "EXCEPTION", text: "" }), {
+      status: 200, headers: { "content-type": "application/json" }
+    });
   }
 };
