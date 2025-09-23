@@ -1,68 +1,121 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Brain Supplements Finder</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-<header class="site-header">
-  <h1>Brain Supplements Finder</h1>
-  <p class="tagline">Search supplements and filter by indication. Nothing loads until you type or choose an indication.</p>
-</header>
+// netlify/functions/coach_llm.js
+export default async (req, context) => {
+  try {
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) {
+      return new Response(JSON.stringify({ ok: false, reason: "NO_API_KEY", text: "" }), { status: 200, headers: { "content-type": "application/json" }});
+    }
+    if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
-<main class="container">
-  <section class="controls">
-    <div class="control-group">
-      <label for="search">Search by name (type the first few letters):</label>
-      <input id="search" type="text" placeholder="e.g., mag..." autocomplete="off" />
-    </div>
+    const body = await req.json().catch(() => ({}));
+    const { supplement_name, fields, selected_goals = [] } = body || {};
+    if (!supplement_name || !fields) {
+      return new Response(JSON.stringify({ ok: false, reason: "BAD_INPUT", text: "" }), { status: 200, headers: { "content-type": "application/json" }});
+    }
 
-    <fieldset class="control-group">
-      <legend>Filter by indication (multi-select):</legend>
-      <div class="checkboxes" id="indication-boxes">
-        <label><input type="checkbox" value="sleep_flag"> Sleep</label><label><input type="checkbox" value="metabolic_flag"> Metabolic</label><label><input type="checkbox" value="immune_flag"> Immune</label><label><input type="checkbox" value="cardiovascular_flag"> Cardiovascular</label><label><input type="checkbox" value="anti_inflammatory_flag"> Anti Inflammatory</label>
-      </div>
-    </fieldset>
+    const AUGMENT_RULES = {
+      "creatine": [
+        "Supports maintenance and accrual of lean mass when paired with progressive resistance training.",
+        "May increase high-energy phosphate availability; some contexts show cognitive benefits."
+      ],
+      "protein": [
+        "Adequate daily protein helps preserve and build muscle; distribute across meals.",
+        "Pair with resistance training to support strength, function, and metabolic health."
+      ],
+      "whey_protein": [
+        "Rapidly absorbed, leucine-rich; supports muscle protein synthesis post-exercise.",
+        "Consider lactose tolerance and overall protein targets."
+      ],
+      "omega_3": [
+        "EPA/DHA may aid recovery perception; supports cardiometabolic health that indirectly benefits cognition.",
+        "Not a substitute for protein intake or resistance training."
+      ],
+      "magnesium": [
+        "May support sleep quality and muscle relaxation; correct deficiency where relevant."
+      ]
+    };
 
-    <div class="buttons">
-      <button id="resetBtn" class="secondary">Reset</button>
-    </div>
-  </section>
+    const norm = (s) => String(s||"").toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+    const keyGuess = norm(fields.supplement_key || supplement_name);
+    const augment = AUGMENT_RULES[keyGuess] || {};
 
-  <section id="status" class="status">Type at least 1 letter or choose an indication to begin.</section>
+    const {
+      level_of_evidence = "",
+      mechanisms = "",
+      direct_cognitive_benefits = "",
+      indirect_cognitive_benefits = "",
+      suggested_dosage = "",
+      potential_risks = "",
+      why_top_choice = ""
+    } = fields;
 
-  <section id="group-summary" class="group-summary" hidden></section>
+    const GOAL_MAP = { sleep:"Sleep", metabolic:"Metabolic", cardiovascular:"Cardiovascular", immune:"Immune", anti_inflammatory:"Inflammation" };
+    const goals = (Array.isArray(selected_goals) ? selected_goals : [])
+      .map(g => String(g||"").toLowerCase())
+      .map(g => GOAL_MAP[g] || null)
+      .filter(Boolean);
 
-  <section id="results" class="results"></section>
-</main>
+    const system = [
+      "Role: You are a conservative clinical summarizer for brain-health supplements.",
+      "Constraints:",
+      "- Use ONLY the user-provided CSV fields and the clinician-approved AUGMENT bullets.",
+      "- Do NOT invent or add medical claims, mechanisms, dosages, or risks beyond those sources.",
+      "- If a field is missing, omit it without speculation.",
+      "- Keep tone clinical yet empowering; ~120–180 words.",
+      "- Organize as 3 compact paragraphs:",
+      "  1) Evidence tier and what it implies; add one sentence tailored to the user's selected goals if provided.",
+      "  2) Mechanistic rationale and expected cognitive pathway; mention dose only if provided.",
+      "  3) Monitoring focus tailored to goals; 1 coaching tip (from why_top_choice or AUGMENT).",
+      "- Never provide medical directives or diagnoses."
+    ].join("\n");
 
-<footer class="site-footer">
-  <p>Built for evidence-driven brain health coaching. Data source: <code>data/master.csv</code>.</p>
-</footer>
+    const user = JSON.stringify({
+      supplement_name,
+      goals,
+      fields: {
+        level_of_evidence,
+        mechanisms,
+        direct_cognitive_benefits,
+        indirect_cognitive_benefits,
+        suggested_dosage,
+        potential_risks,
+        why_top_choice
+      },
+      AUGMENT: augment
+    });
 
-<script>
-  window.__APP_CONFIG__ = {
-    nameCol: "supplement_name",
-    keyCol: "supplement_key",
-    aliasCol: "aliases",
-    flagCols: ["sleep_flag", "metabolic_flag", "immune_flag", "cardiovascular_flag", "anti_inflammatory_flag"],
-    detailCols: ["direct_cognitive_benefits", "indirect_cognitive_benefits", "mechanisms", "food_sources", "suggested_dosage", "potential_risks", "level_of_evidence"],
-    brandCols: ["recommended_brand", "why_top_choice", "approx_cost", "purchase_source"],
-    indicationsDisplayCol: "indications_display"
-  };
-</script>
-<script src="assets/app.js"></script>
-<script src="assets/coach.js"></script>
-  <!-- Feature flag: start FALSE to validate Reset first -->
-<script>
-  window.__ENABLE_LLM_COACH = false;  /* flip to true in Step 6 to enable the panel */
-  window.__LLM_GOAL_KEYS = ["sleep","metabolic","cardiovascular","immune","anti_inflammatory"];
-</script>
+    const payload = {
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user }
+      ]
+    };
 
-<!-- Safe add-on (will no-op while flag is false) -->
-<script src="assets/gpt_summary.js"></script>
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
 
-</body>
-</html>
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "authorization": `Bearer ${OPENAI_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal
+    }).catch(() => null);
+    clearTimeout(t);
+
+    if (!resp || !resp.ok) {
+      return new Response(JSON.stringify({ ok: false, reason: "API_ERROR", text: "" }), { status: 200, headers: { "content-type": "application/json" }});
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    const text = data?.choices?.[0]?.message?.content?.trim() || "";
+    if (!text || text.length < 40) {
+      return new Response(JSON.stringify({ ok: false, reason: "EMPTY", text: "" }), { status: 200, headers: { "content-type": "application/json" }});
+    }
+
+    return new Response(JSON.stringify({ ok: true, text }), { status: 200, headers: { "content-type": "application/json" }});
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, reason: "EXCEPTION", text: "" }), { status: 200, headers: { "content-type": "application/json" }});
+  }
+};
