@@ -2,7 +2,8 @@
 // Non-destructive AI add-on:
 //  • Per-card panel “AI-Generated Coaching Insights” (for every visible card)
 //  • Bottom-of-page “AI Group Coaching Insights” shown only when one goal is selected
-//  • Real <p> paragraphs (no bunched text)
+//  • Readability upgrade: labels stacked ABOVE values across all boxes
+//  • Real <p> paragraphs for AI text (no “bunched” text)
 //  • Reset clears ALL AI content + Coach Group Summary and suppresses immediate re-injection
 //  • Enforces single-selection behavior for indications (radio-like) without touching HTML
 //  • ES5-compatible; does not modify your app.js handlers or CSV logic
@@ -14,16 +15,22 @@
   function text(el){ return el && el.textContent ? el.textContent.trim() : ''; }
   function has(el){ return !!(el && el.parentNode); }
 
-  // ---------- minimal CSS injection for readability ----------
-  (function injectCSS(){
+  // ---------- CSS injection ----------
+  // (1) Global readability for ALL .kv rows: stack labels above values
+  // (2) AI panel paragraph styling
+  ;(function injectCSS(){
     if (qs('#ai-insights-css')) return;
     var css = document.createElement('style');
     css.id = 'ai-insights-css';
     css.textContent =
-      '.ai-insights p{margin:8px 0;line-height:1.6;}'
+      /* Global KV stacking (applies to Details / Brands / Coach Summary) */
+      '.box .content .kv{display:block !important; padding-top:8px; margin:10px 0 14px; border-top:1px solid rgba(255,255,255,.06);}'
+    + ' .box .content .kv:first-child{border-top:none; padding-top:0;}'
+    + ' .box .content .kv .label{display:block !important; font-weight:600; font-size:0.95rem; opacity:.9; margin:0 0 4px;}'
+    + ' .box .content .kv .val{display:block !important; font-size:1rem; line-height:1.7; white-space:pre-wrap; word-break:normal;}'
+      /* AI panel styling */
+    + ' .ai-insights p{margin:8px 0; line-height:1.6;}'
     + ' .ai-insights .muted{opacity:.82;}'
-    + ' .ai-insights .kv{display:block;}'
-    + ' .ai-insights .kv .label{min-width:0;}'
     + ' #ai-group-summary{margin:16px 0 32px; border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); background:rgba(17,23,51,.7); padding:12px;}'
     + ' #ai-group-summary h2{margin:0 0 6px; font-size:20px;}'
     + ' #ai-group-summary[hidden]{display:none;}';
@@ -71,7 +78,7 @@
     var h3 = qs('h3', card);
     var name = text(h3) || 'Unknown supplement';
 
-    // Prefer “Details”; otherwise collect from whole card (fixes Glycine / Zinc cases)
+    // Prefer “Details”; otherwise collect from whole card (handles Zinc/Glycine etc.)
     var details = findBox(card, /details/i);
     var kv  = details ? collectKVMap(details) : collectKVMapAnywhere(card);
 
@@ -103,10 +110,10 @@
   }
 
   function groupPayloadFromVisible(){
-    var boxes = qsa('.card');
+    var cards = qsa('.card');
     var items = [];
-    for (var i=0;i<boxes.length;i++){
-      var card = boxes[i];
+    for (var i=0;i<cards.length;i++){
+      var card = cards[i];
       var h3 = qs('h3', card);
       var name = text(h3);
       if (!name) continue;
@@ -292,7 +299,7 @@
       for (var i=0;i<all.length;i++){
         if (all[i] !== t) all[i].checked = false;
       }
-      // trigger group update after app rerender has happened
+      // update group insights after your app re-renders
       setTimeout(updateBottomGroup, 0);
     });
   }
