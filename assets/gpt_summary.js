@@ -1,15 +1,18 @@
 // assets/gpt_summary.js
-// Inserts a separate collapsible panel “AI-Generated Coaching Insights” into each card,
-// formats into real <p> paragraphs, and CLEARS all AI panels on Reset.
-// ES5-compatible and isolated: does not touch your app.js handlers.
+// AI panel add-on (non-destructive):
+// - Inserts a separate collapsible panel “AI-Generated Coaching Insights” into each card
+// - Formats into real <p> paragraphs (no “bunched” text)
+// - Clears ALL AI panels on Reset and suppresses immediate reinjection during Reset
+// - ES5-compatible; never modifies your app.js handlers or CSV logic
 
 (function(){
+  // ===== Small helpers =====
   function qs(s, r){ return (r||document).querySelector(s); }
   function qsa(s, r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
   function text(el){ return el && el.textContent ? el.textContent.trim() : ''; }
 
-  // Inject minimal CSS for better readability (no edit to style.css needed).
-  (function injectCSS(){
+  // Inject minimal CSS for better readability (no edits to style.css needed)
+  ;(function injectCSS(){
     if (qs('#ai-insights-css')) return;
     var css = document.createElement('style');
     css.id = 'ai-insights-css';
@@ -21,41 +24,56 @@
     document.head.appendChild(css);
   })();
 
-  function collectKVMap(detailsBox){
+  // Collect key-value rows within a given box
+  function collectKVMap(container){
     var map = {};
-    var rows = qsa('.kv', detailsBox);
+    var rows = qsa('.kv', container);
     for (var i=0;i<rows.length;i++){
-      var row = rows[i];
-      var lab = qs('.label', row);
-      var valEl = qs('.val', row);
-      var label = text(lab).toLowerCase();
-      var val = text(valEl);
-      if (label) map[label] = val;
+      var lab = qs('.label', rows[i]);
+      var val = qs('.val', rows[i]);
+      var k = text(lab).toLowerCase();
+      var v = text(val);
+      if (k) map[k] = v;
     }
     return map;
   }
 
+  // Collect KV from anywhere in the card (fallback when “Details” box is absent/renamed)
+  function collectKVMapAnywhere(card){
+    var map = {};
+    var rows = qsa('.kv', card);
+    for (var i=0;i<rows.length;i++){
+      var lab = qs('.label', rows[i]);
+      var val = qs('.val', rows[i]);
+      var k = text(lab).toLowerCase();
+      var v = text(val);
+      if (k && map[k] == null) map[k] = v;
+    }
+    return map;
+  }
+
+  // Find a <details class="box"> by its summary title (regex, case-insensitive)
   function findBox(card, titleRegex){
     var boxes = qsa('.box', card);
     for (var i=0;i<boxes.length;i++){
       var sum = qs('summary', boxes[i]);
       if (!sum) continue;
-      var title = text(sum);
-      if (titleRegex.test(title)) return boxes[i];
+      var t = text(sum);
+      if (titleRegex.test(t)) return boxes[i];
     }
     return null;
   }
 
+  // Build payload for the function call (NEVER returns null now)
   function payloadFromCard(card){
     var h3 = qs('h3', card);
-    var name = text(h3);
-    if (!name) return null;
+    var name = text(h3) || 'Unknown supplement';
 
+    // Prefer the “Details” box; otherwise collect from anywhere
     var details = findBox(card, /details/i);
-    var brands  = findBox(card, /recommended brands/i);
-    if (!details) return null;
+    var kv  = details ? collectKVMap(details) : collectKVMapAnywhere(card);
 
-    var kv  = collectKVMap(details);
+    var brands  = findBox(card, /recommended brands/i);
     var kvb = brands ? collectKVMap(brands) : {};
 
     var fields = {
@@ -70,6 +88,7 @@
       why_top_choice: kvb['why top choice'] || ''
     };
 
+    // Selected goals from indication checkboxes
     var prefer = (window.__LLM_GOAL_KEYS || ["sleep","metabolic","cardiovascular","immune","anti_inflammatory"]);
     var cbs = qsa('#indication-boxes input[type=checkbox]:checked');
     var selectedGoals = [];
@@ -77,10 +96,10 @@
       var v = String(cbs[i].value||'').toLowerCase().replace('_flag','');
       if (prefer.indexOf(v) !== -1) selectedGoals.push(v);
     }
-
     return { supplement_name: name, fields: fields, selected_goals: selectedGoals };
   }
 
+  // Insert the AI panel into a card (after “Coach Summary” if present)
   function insertPanel(card){
     var sections = qs('.sections', card);
     if (!sections) return null;
@@ -93,7 +112,6 @@
       + '  <p class="muted">Generating…</p>'
       + '</div>';
 
-    // Place after “Coach Summary” if present; else before everything.
     var boxes = qsa('.box', sections);
     var inserted = false;
     for (var i=0;i<boxes.length;i++){
@@ -109,21 +127,21 @@
     return panel;
   }
 
+  // Render plain text into clean paragraphs
   function toParagraphs(plain){
-    // Split on double newlines and wrap in <p>.
     var blocks = String(plain||'').trim().split(/\n\s*\n/);
     var html = '';
     for (var i=0;i<blocks.length;i++){
       var b = blocks[i].trim();
       if (!b) continue;
-      // Escape minimal angle brackets to avoid accidental HTML
       b = b.replace(/</g,'&lt;').replace(/>/g,'&gt;');
       html += '<p>'+ b +'</p>';
     }
     if (!html) html = '<p class="muted">Add-on unavailable; using CSV summaries only.</p>';
     return html;
-    }
+  }
 
+  // Call the Netlify function
   function fetchLLMText(payload){
     return fetch('/.netlify/functions/coach_llm', {
       method: 'POST',
@@ -135,41 +153,51 @@
     .catch(function(){ return ''; });
   }
 
+  // Suppress flag to block auto-injection during Reset re-render
+  var SUPPRESS_UNTIL = 0;
+
+  // Enhance one card
   function enhanceCard(card){
     if (!card || card.getAttribute('data-llmCoach') === '1') return;
-    var payload = payloadFromCard(card);
-    if (!payload) return;
+    if (Date.now() < SUPPRESS_UNTIL) return; // do not inject during/just after Reset
 
+    var payload = payloadFromCard(card);
     var panel = insertPanel(card);
     if (!panel) return;
-    card.setAttribute('data-llmCoach','1');
 
+    card.setAttribute('data-llmCoach','1');
     var container = qs('.ai-insights', panel);
+
     fetchLLMText(payload).then(function(out){
       container.innerHTML = toParagraphs(out);
     });
   }
 
+  // Run on visible cards (throttled)
   function run(limit){
+    if (Date.now() < SUPPRESS_UNTIL) return; // still suppressing post-Reset
     var cards = qsa('.card');
     var n = Math.min(limit||5, cards.length);
     for (var i=0;i<n;i++) enhanceCard(cards[i]);
   }
 
-  // === NEW: Clear all AI panels on Reset ===
+  // Remove every AI panel and allow re-injection later
   function clearAllAIPanels(){
-    var panels = qsa('.ai-insights-panel', qs('#results'));
+    var results = qs('#results');
+    if (!results) return;
+    var panels = qsa('.ai-insights-panel', results);
     for (var i=0;i<panels.length;i++){
-      var card = panels[i].closest('.card');
-      if (card) card.removeAttribute('data-llmCoach'); // allow reinjection on next render
+      var card = panels[i].closest ? panels[i].closest('.card') : null;
+      if (card) card.removeAttribute('data-llmCoach');
       if (panels[i].parentNode) panels[i].parentNode.removeChild(panels[i]);
     }
   }
 
+  // Initialize hooks (non-destructive)
   function init(){
     if (!window.__ENABLE_LLM_COACH) return;
 
-    // Hook renderResults if defined
+    // Wrap renderResults if available
     if (typeof window.renderResults === 'function'){
       var orig = window.renderResults;
       window.renderResults = function(){
@@ -185,13 +213,34 @@
       }
     }
 
-    // Bind Reset button to clear AI panels explicitly
+    // Reset button: clear AI panels and suppress reinjection briefly
     var reset = qs('#resetBtn');
-    if (reset) {
+    if (reset){
       reset.addEventListener('click', function(){
-        // Delay slightly to let app.js clear search/filters, then remove AI panels
+        // 1) Clear panels immediately
+        clearAllAIPanels();
+        // 2) Suppress any auto-injection caused by app's re-render after Reset
+        SUPPRESS_UNTIL = Date.now() + 400; // 400ms window
+        // 3) After the app finishes its reset cycle, clear again just in case
         setTimeout(clearAllAIPanels, 0);
+        setTimeout(clearAllAIPanels, 350);
       });
+    }
+
+    // If search is empty AND no indications are checked, keep the page clean (no AI panels)
+    var controls = qs('.controls');
+    if (controls){
+      var tidy = function(){
+        var search = qs('#search');
+        var val = search ? String(search.value||'').trim() : '';
+        var any = qsa('#indication-boxes input[type=checkbox]:checked').length > 0;
+        if (!val && !any){
+          SUPPRESS_UNTIL = Date.now() + 400;
+          clearAllAIPanels();
+        }
+      };
+      controls.addEventListener('input', function(){ setTimeout(tidy, 0); });
+      controls.addEventListener('change', function(){ setTimeout(tidy, 0); });
     }
   }
 
