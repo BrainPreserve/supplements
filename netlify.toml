@@ -1,14 +1,12 @@
 [build]
-  # Your static site (index.html, assets/) lives under "supplements"
-  publish = "supplements"
+  publish = "."
   command = ""
 
 [functions]
-  # Tell Netlify where your functions live
-  directory = "supplements/netlify/functions"
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Optional: lets you also call /api/coach_llm if you prefer that path later
+# Optional convenience: lets you also call /api/coach_llm if ever needed
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
