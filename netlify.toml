@@ -6,7 +6,35 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Keep your redirect so /api/* maps to your serverless functions
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
+
+# Security headers that won't break your current inline scripts or local assets
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=(), payment=(), gyroscope=(), magnetometer=(), accelerometer=(), usb=(), bluetooth=()"
+
+    # CSP:
+    # - 'unsafe-inline' in script/style because index.html sets small inline config blocks (keeps app working)
+    # - connect-src allows BOTH your functions (same-origin) and direct OpenAI, so you don't have to change frontend code
+    Content-Security-Policy = """
+      default-src 'self';
+      script-src 'self' 'unsafe-inline';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data:;
+      font-src 'self';
+      connect-src 'self' https://api.openai.com;
+      frame-ancestors 'none';
+      base-uri 'none';
+      form-action 'self';
+      object-src 'none';
+      upgrade-insecure-requests;
+    """
