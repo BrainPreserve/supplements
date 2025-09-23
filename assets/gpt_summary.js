@@ -1,7 +1,6 @@
 // assets/gpt_summary.js
 // Adds a separate collapsible panel: “AI-Generated Coaching Insights”.
-// Safe behavior: if disabled, or if the API/key fails, it no-ops and your CSV panels remain unchanged.
-// No optional chaining; extra defensive checks for broader Safari compatibility.
+// Safe behavior: ES5-compatible, loaded last, and does not touch existing handlers or filters.
 
 (function(){
   function qs(s, r){ return (r||document).querySelector(s); }
