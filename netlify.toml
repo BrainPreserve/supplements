@@ -1,30 +1,45 @@
+# netlify.toml — safe defaults that will NOT break your current app
+
 [build]
+  # Keep your static site as-is (no build step required for now)
   publish = "."
   command = ""
 
 [functions]
+  # Your serverless functions live here (e.g., coach_llm, openai, chat)
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Keep your redirect so /api/* maps to your serverless functions
+# Keep the existing API-friendly path so your frontend never needs to change
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# Security headers that won't break your current inline scripts or local assets
+# ---- Security headers for the MAIN DOCUMENT and static assets ----
+# These are applied by Netlify to your pages/assets (functions have their own headers).
 [[headers]]
   for = "/*"
   [headers.values]
+    # Transport & MIME safety
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
     X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "no-referrer"
+
+    # Framing/clickjacking protection
     X-Frame-Options = "DENY"
+
+    # Privacy-friendly referer behavior
+    Referrer-Policy = "no-referrer"
+
+    # Lock powerful browser features (none needed for this app)
     Permissions-Policy = "geolocation=(), microphone=(), camera=(), payment=(), gyroscope=(), magnetometer=(), accelerometer=(), usb=(), bluetooth=()"
 
-    # CSP:
-    # - 'unsafe-inline' in script/style because index.html sets small inline config blocks (keeps app working)
-    # - connect-src allows BOTH your functions (same-origin) and direct OpenAI, so you don't have to change frontend code
+    # Content Security Policy
+    # - 'unsafe-inline' for scripts/styles so your current inline snippets keep working.
+    # - connect-src allows your site to talk to:
+    #     • itself (/.netlify/functions/*),
+    #     • api.openai.com (if any legacy direct calls exist).
+    # Tighten later once everything is fully routed through functions.
     Content-Security-Policy = """
       default-src 'self';
       script-src 'self' 'unsafe-inline';
